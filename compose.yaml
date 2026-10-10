@@ -1,0 +1,72 @@
+# mailstack: a local, searchable IMAP copy of a remote mailbox.
+#
+#   cp .env.example .env   # then fill it in
+#   docker compose up -d
+#
+# See README.md for what each setting does.
+name: mailstack
+
+services:
+  dovecot:
+    image: ghcr.io/jon6fingrs/mailstack-dovecot:${MAILSTACK_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "${IMAPS_PORT:-993}:993"
+    environment:
+      MAIL_USER: ${MAIL_USER:?set MAIL_USER in .env}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:?set MAIL_PASSWORD in .env}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TLS_CERT_FILE: ${TLS_CERT_FILE:-}
+      TLS_KEY_FILE: ${TLS_KEY_FILE:-}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ${MAIL_DIR:?set MAIL_DIR in .env}:/mail
+      # Read-only: the container never changes your certificate files.
+      - ${CERT_DIR:-./certs}:/ssl:ro
+    networks: [default, backend]
+    depends_on:
+      solr:
+        condition: service_healthy
+      tika:
+        condition: service_started
+
+  mbsync:
+    image: ghcr.io/jon6fingrs/mailstack-mbsync:${MAILSTACK_VERSION:-latest}
+    restart: unless-stopped
+    # Runs as the owner of the mail archive; nothing runs as root.
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      REMOTE_HOST: ${REMOTE_HOST:?set REMOTE_HOST in .env}
+      REMOTE_PORT: ${REMOTE_PORT:-993}
+      REMOTE_USER: ${REMOTE_USER:?set REMOTE_USER in .env}
+      REMOTE_PASSWORD: ${REMOTE_PASSWORD:?set REMOTE_PASSWORD in .env}
+      TLS_TYPE: ${TLS_TYPE:-IMAPS}
+      ACCOUNT_NAME: ${ACCOUNT_NAME:-remote}
+      SYNC_INTERVAL: ${SYNC_INTERVAL:-300}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ${MAIL_DIR}:/mail
+
+  solr:
+    image: ghcr.io/jon6fingrs/mailstack-solr:${MAILSTACK_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      SOLR_HEAP: ${SOLR_HEAP:-1g}
+    volumes:
+      - solr-data:/var/solr
+    networks: [backend]
+
+  tika:
+    image: apache/tika:4.1.0
+    restart: unless-stopped
+    networks: [backend]
+
+networks:
+  # Solr and Tika have no authentication, so they live on a network with no
+  # published ports and no internet access. Only Dovecot can reach them.
+  backend:
+    internal: true
+
+volumes:
+  solr-data:

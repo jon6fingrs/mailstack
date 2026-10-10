@@ -1,0 +1,4 @@
+.env
+certs/
+# Personal additions to compose.yaml (extra networks, ports, names)
+compose.override.yaml
