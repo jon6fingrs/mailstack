@@ -1,0 +1,61 @@
+# End-to-end test stack: the real mailstack images, plus a throwaway Dovecot
+# standing in for the remote provider. Driven by tests/smoke.sh.
+name: mailstack-test
+
+services:
+  remote:
+    image: dovecot/dovecot:2.4.5-root
+    environment:
+      USER_PASSWORD: remotepass
+    volumes:
+      - ./remote.conf:/etc/dovecot/conf.d/zz-test.conf:ro
+      - ${TEST_DIR}/remote/tls.crt:/etc/dovecot/ssl/tls.crt:ro
+      - ${TEST_DIR}/remote/tls.key:/etc/dovecot/ssl/tls.key:ro
+
+  dovecot:
+    build: ../dovecot
+    environment:
+      MAIL_USER: tester
+      MAIL_PASSWORD_FILE: /run/secrets/mail_password
+      PUID: "1026"
+      PGID: "100"
+      TLS_CERT_FILE: /ssl/cert.pem
+      TLS_KEY_FILE: /ssl/key.pem
+      INDEX_INTERVAL: "10"
+      CERT_CHECK_INTERVAL: "5"
+    volumes:
+      - ${TEST_DIR}/mail:/mail
+      - ${TEST_DIR}/ssl:/ssl:ro
+      - ${TEST_DIR}/mail_password:/run/secrets/mail_password:ro
+    networks: [default, backend]
+    depends_on:
+      solr:
+        condition: service_healthy
+
+  mbsync:
+    build: ../mbsync
+    user: "1026:100"
+    environment:
+      REMOTE_HOST: remote
+      REMOTE_USER: someone@example.com
+      REMOTE_PASSWORD: remotepass
+      ACCOUNT_NAME: fastmail
+      SYNC_INTERVAL: "5"
+    volumes:
+      - ${TEST_DIR}/mail:/mail
+      # Trust only the test CA that signed the fake remote's certificate.
+      - ${TEST_DIR}/remote-ca.pem:/etc/ssl/certs/ca-certificates.crt:ro
+
+  solr:
+    build: ../solr
+    environment:
+      SOLR_HEAP: 512m
+    networks: [backend]
+
+  tika:
+    image: apache/tika:4.1.0
+    networks: [backend]
+
+networks:
+  backend:
+    internal: true
