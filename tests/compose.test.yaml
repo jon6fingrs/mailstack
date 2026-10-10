@@ -29,8 +29,7 @@ services:
       - ${TEST_DIR}/mail_password:/run/secrets/mail_password:ro
     networks: [default, backend]
     depends_on:
-      solr:
-        condition: service_healthy
+      - tika
 
   mbsync:
     build: ../mbsync
@@ -45,12 +44,6 @@ services:
       - ${TEST_DIR}/mail:/mail
       # Trust only the test CA that signed the fake remote's certificate.
       - ${TEST_DIR}/remote-ca.pem:/etc/ssl/certs/ca-certificates.crt:ro
-
-  solr:
-    build: ../solr
-    environment:
-      SOLR_HEAP: 512m
-    networks: [backend]
 
   tika:
     image: apache/tika:4.1.0

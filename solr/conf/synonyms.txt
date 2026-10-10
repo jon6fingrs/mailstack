@@ -1,2 +1,0 @@
-# Query-time synonyms, e.g.:
-#   tv, television

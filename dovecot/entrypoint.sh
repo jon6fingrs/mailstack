@@ -27,7 +27,6 @@ INDEX_INTERVAL=${INDEX_INTERVAL:-120}
 CERT_CHECK_INTERVAL=${CERT_CHECK_INTERVAL:-300}
 export TLS_CERT_FILE=${TLS_CERT_FILE:-/etc/dovecot/ssl/tls.crt}
 export TLS_KEY_FILE=${TLS_KEY_FILE:-/etc/dovecot/ssl/tls.key}
-export SOLR_URL=${SOLR_URL:-http://solr:8983/solr/dovecot/}
 export TIKA_URL=${TIKA_URL:-http://tika:9998/tika/}
 
 [[ -n "$MAIL_USER" ]] || die "MAIL_USER is not set"

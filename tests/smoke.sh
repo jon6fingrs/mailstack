@@ -1,6 +1,6 @@
 #!/bin/bash
 # End-to-end test: mbsync pulls from a fake remote into a Maildir, Dovecot
-# serves it over IMAPS, Solr + Tika make it searchable.
+# serves it over IMAPS, Dovecot's flatcurve index + Tika make it searchable.
 #
 #   tests/smoke.sh          # build, run, test, clean up
 #   KEEP=1 tests/smoke.sh   # leave the stack running afterwards
@@ -67,7 +67,7 @@ printf '%s\n' "$USER_PASS" > "$TEST_DIR/mail_password"
 new_cert
 
 echo "== building and starting"
-"${COMPOSE[@]}" up -d --build --wait --wait-timeout 300 remote solr tika dovecot \
+"${COMPOSE[@]}" up -d --build --wait --wait-timeout 300 remote tika dovecot \
   || fail "stack didn't start"
 
 dc() { "${COMPOSE[@]}" exec -T "$@"; }
@@ -138,45 +138,69 @@ if dc dovecot curl -sS --cacert /ssl/cert.pem --user "$USER_NAME:wrong" imaps://
 fi
 pass "wrong password is rejected"
 
-echo "== search (Solr + Tika)"
-solr_docs() {
-  dc solr curl -s 'http://localhost:8983/solr/dovecot/select?q=*:*&rows=0&wt=json' \
-    | python3 -c 'import sys,json; print(json.load(sys.stdin)["response"]["numFound"])'
+echo "== search (flatcurve index + Tika)"
+# Ask the index directly (no IMAP search, which would index on demand), so a
+# hit proves the background indexing job put the message there.
+in_index() {  # in_index <mailbox> <criteria...>
+  local box=$1; shift
+  # Prints "<mailbox>: <uids>" on a hit, "<mailbox>: no results" otherwise.
+  dc dovecot doveadm fts lookup -u "$USER_NAME" mailbox "$box" "$@" 2>/dev/null | grep -qE ': [0-9]'
 }
-solr_has_all() { [[ "$(solr_docs)" -ge 4 ]]; }
-wait_for 90 solr_has_all || fail "Solr didn't receive the messages (has $(solr_docs))"
-pass "background indexing put all 4 messages into Solr"
+wait_for 90 in_index INBOX body zebrafish || fail "background indexing didn't index INBOX"
+pass "background indexing put new mail into the search index"
+in_index INBOX text quokka || fail "the Word attachment's text isn't in the index"
+pass "attachment text is in the index (Tika)"
 
 search() {  # search <mailbox> <criteria...>
   local box=$1; shift
   imap "imaps://localhost/$box" -X "SEARCH $*" | tr -d '\r'
 }
-[[ "$(search INBOX BODY zebrafish)" == "* SEARCH 1" ]] || fail "BODY zebrafish: $(search INBOX BODY zebrafish)"
-pass "body search"
-[[ "$(search INBOX TEXT quokka)" == "* SEARCH 2" ]] || fail "attachment search: $(search INBOX TEXT quokka)"
-pass "search finds text inside a Word attachment (Tika)"
-[[ "$(search Work%20Stuff BODY narwhal)" == "* SEARCH 1" ]] || fail "search in folder with a space"
-pass "search in a folder with a space"
-[[ "$(search Archive BODY cafe)" == "* SEARCH 1" ]] || fail "accent-insensitive search: $(search Archive BODY cafe)"
-pass "'cafe' finds 'Café' (accent folding)"
-[[ "$(search INBOX BODY swimming)" == "* SEARCH 1" ]] || fail "stemming: $(search INBOX BODY swimming)"
-pass "'swimming' finds 'swims' (stemming)"
-[[ "$(search INBOX FUZZY BODY zebrafsh)" == "* SEARCH 1" ]] || fail "fuzzy search: $(search INBOX FUZZY BODY zebrafsh)"
-pass "FUZZY search tolerates a typo ('zebrafsh')"
+expect() {  # expect <description> <expected reply> <mailbox> <criteria...>
+  local what=$1 want=$2 box=$3; shift 3
+  local got; got=$(search "$box" "$@")
+  [[ "$got" == "$want" ]] || fail "$what: SEARCH $* in $box gave '$got', expected '$want'"
+  pass "$what"
+}
+expect "body search"                                 "* SEARCH 1" INBOX BODY zebrafish
+expect "search finds text inside a Word attachment"  "* SEARCH 2" INBOX TEXT quokka
+expect "search in a folder with a space"             "* SEARCH 1" "Work%20Stuff" BODY narwhal
+expect "'cafe' finds 'Café' (accents ignored)"       "* SEARCH 1" Archive BODY cafe
+expect "'swimming' finds 'swims' (word variants)"    "* SEARCH 1" INBOX BODY swimming
+expect "'zebra' finds 'zebrafish' (start of word)"   "* SEARCH 1" INBOX BODY zebra
+expect "'narw' finds 'narwhal'"                      "* SEARCH 1" "Work%20Stuff" BODY narw
 
-"${COMPOSE[@]}" stop solr >/dev/null
-if search INBOX BODY narwhal >/dev/null 2>&1; then
-  fail "search still worked with Solr stopped, so it isn't using Solr"
-fi
-"${COMPOSE[@]}" start solr >/dev/null
-wait_for 120 search INBOX BODY zebrafish || fail "search didn't recover after Solr restarted"
-pass "searches go through Solr (and recover when it comes back)"
+echo "== All Mail and Flagged"
+list=$(imap imaps://localhost/ -X 'LIST "" "Virtual/*" RETURN (SPECIAL-USE)') || fail "LIST Virtual failed"
+grep -q '(\\All) "/" Virtual/All' <<<"$list" || fail "Virtual/All missing or not \\All: $list"
+grep -q '(\\Flagged) "/" Virtual/Flagged' <<<"$list" || fail "Virtual/Flagged missing: $list"
+pass "Virtual/All and Virtual/Flagged are listed with their special-use flags"
+lsub=$(imap imaps://localhost/ -X 'LSUB "" "Virtual/*"') || fail "LSUB failed"
+grep -q 'Virtual/All' <<<"$lsub" || fail "Virtual/All isn't subscribed, so phones won't show it: $lsub"
+pass "the virtual folders are subscribed, so mail apps show them"
+got=$(search Virtual/All BODY narwhal)
+[[ "$got" =~ ^\*\ SEARCH\ [0-9]+$ ]] || fail "searching Virtual/All for narwhal gave '$got', expected one match"
+pass "searching Virtual/All finds mail from another folder"
+messages() {  # messages <mailbox>
+  imap imaps://localhost/ -X "STATUS \"$1\" (MESSAGES)" | tr -d '\r' | sed -E 's/.*MESSAGES ([0-9]+).*/\1/'
+}
+[[ "$(messages Virtual/All)" == 4 ]] || fail "Virtual/All has $(messages Virtual/All) messages, expected 4"
+pass "Virtual/All holds all 4 messages"
+[[ "$(messages Virtual/Flagged)" == 0 ]] || fail "Virtual/Flagged isn't empty before flagging"
+imap "imaps://localhost/Work%20Stuff" -X 'STORE 1 +FLAGS (\Flagged)' >/dev/null || fail "couldn't flag a message"
+[[ "$(messages Virtual/Flagged)" == 1 ]] || fail "flagged message didn't show up in Virtual/Flagged"
+pass "flagging a message adds it to Virtual/Flagged"
+
+echo "== later mail"
+seed INBOX "Later" "the axolotl arrived after indexing" m5
+wait_for 60 in_index INBOX body axolotl || fail "mail synced after the index existed wasn't indexed"
+pass "mbsync keeps syncing alongside the index folders, and later mail is indexed"
 
 echo "== archive semantics"
 dc remote doveadm expunge -u someone@example.com mailbox INBOX all
 sleep 12
 count=$(find "$TEST_DIR/mail/INBOX" -path '*/cur/*' -o -path '*/new/*' | grep -c . || true)
-[[ "$count" -eq 2 ]] || fail "deleting on the remote removed local mail ($count left)"
+# 2 seeded at the start + 1 seeded later; the remote now has none.
+[[ "$count" -eq 3 ]] || fail "deleting on the remote removed local mail ($count left)"
 pass "deleting mail on the remote keeps the local copy"
 
 echo "== certificate reload"
@@ -192,10 +216,9 @@ wait_for 60 serving_new_cert || fail "Dovecot still serves the old certificate"
 pass "a renewed certificate is picked up without a restart"
 
 echo "== logs"
-# Expected: Solr errors while the test had it stopped, and an index run cut
-# off by the certificate reload (it's retried on the next run).
-expected_errors='fts-solr: .*Lookup failed: (Failed to lookup host solr|connect\(.*\) failed: Connection refused|503 Service Unavailable)'
-expected_errors+='|indexer-worker.*(auth-userdb.*Disconnected unexpectedly|lookup failed: Unexpectedly disconnected from auth service)'
+# Expected: an index run cut off by the certificate reload (it's retried on
+# the next run).
+expected_errors='indexer-worker.*(auth-userdb.*Disconnected unexpectedly|lookup failed: Unexpectedly disconnected from auth service)'
 if "${COMPOSE[@]}" logs --no-color dovecot mbsync | grep -iE 'panic|fatal|error' | grep -vE "$expected_errors"; then
   fail "unexpected errors in the logs (above)"
 fi
