@@ -128,6 +128,8 @@ caps=$(imap imaps://localhost/ -X CAPABILITY) || fail "IMAPS login failed"
 pass "IMAPS login with a password containing quotes and spaces"
 grep -q 'SEARCH=FUZZY' <<<"$caps" && echo "INFO: server advertises SEARCH=FUZZY" || echo "INFO: no SEARCH=FUZZY capability"
 grep -q 'SPECIAL-USE' <<<"$caps" || fail "no SPECIAL-USE capability"
+! grep -q 'COMPRESS' <<<"$caps" || fail "COMPRESS is advertised; iPhone Mail drops the connection after enabling it"
+pass "COMPRESS isn't offered (iPhone Mail breaks with it)"
 
 list=$(imap imaps://localhost/ -X 'LIST "" "*" RETURN (SPECIAL-USE)') || fail "LIST failed"
 grep -q '(\\Archive) "/" Archive' <<<"$list" || fail "Archive isn't marked \\Archive: $list"
