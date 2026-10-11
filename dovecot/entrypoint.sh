@@ -28,6 +28,9 @@ CERT_CHECK_INTERVAL=${CERT_CHECK_INTERVAL:-300}
 export TLS_CERT_FILE=${TLS_CERT_FILE:-/etc/dovecot/ssl/tls.crt}
 export TLS_KEY_FILE=${TLS_KEY_FILE:-/etc/dovecot/ssl/tls.key}
 export TIKA_URL=${TIKA_URL:-http://tika:9998/tika/}
+# A bare file name ("cert.pem", as the old images took) means a file in /ssl.
+[[ "$TLS_CERT_FILE" == */* ]] || TLS_CERT_FILE=/ssl/$TLS_CERT_FILE
+[[ "$TLS_KEY_FILE" == */* ]] || TLS_KEY_FILE=/ssl/$TLS_KEY_FILE
 
 [[ -n "$MAIL_USER" ]] || die "MAIL_USER is not set"
 [[ "$MAIL_USER" != *[:[:space:]]* ]] || die "MAIL_USER can't contain spaces or ':'"

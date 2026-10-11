@@ -21,7 +21,7 @@ needed: Dovecot keeps its own search index, which you build once (step 5).
 | `ssltype` | — | IMAPS is the default. For STARTTLS, set `TLS_TYPE=STARTTLS` on mbsync. |
 | `sslversions` | — | Not needed: the defaults only allow modern TLS. |
 | `cron=yes` | `SYNC_INTERVAL` | Seconds between syncs (default 300). `0` syncs once and exits. |
-| `ssl_cert`, `ssl_key` | `TLS_CERT_FILE`, `TLS_KEY_FILE` | Full paths inside the container, e.g. `/ssl/cert.pem`. Mount the folder with `CERT_DIR`. |
+| `ssl_cert`, `ssl_key` | `TLS_CERT_FILE`, `TLS_KEY_FILE` | Mount the folder with `CERT_DIR`. A bare name like `cert.pem` means `/ssl/cert.pem`. |
 | `ssl`, `auth_allow_cleartext`, `disable_plaintext_auth` | — | TLS is always on; passwords are only accepted over TLS. |
 | `server_address`, `dh_pem` | — | No longer used. |
 
