@@ -107,9 +107,11 @@ your phone has downloaded. In practice:
   *swims*.
 - Accents and case don't matter: *cafe* finds *Café*.
 - Text inside attachments is searchable (via Tika).
-- Words match from their start, so search-as-you-type works: *invo* finds
-  *invoice*, *447* finds *4471*. Fragments from the middle of a word don't
-  (*voice* won't find *invoice*); see below to turn that on.
+- Partial words match from their start: *invo* finds *invoice*, *447*
+  finds *4471*. Fragments from the middle of a word don't (*voice* won't
+  find *invoice*); see below to turn that on. (iPhone Mail searches mail
+  already on the phone as you type, and asks the server when you press
+  Search; this is what the server does with whatever you typed.)
 - Search **Virtual/All** to search every folder at once.
 
 New mail is indexed in the background within `INDEX_INTERVAL` of arriving.

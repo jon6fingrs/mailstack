@@ -34,7 +34,7 @@ else
 fi
 
 [ -d /mail ] || die "/mail is not mounted"
-[ -w /mail ] || die "/mail isn't writable by uid $(id -u); set user: \"PUID:PGID\" in compose to the archive's owner"
+[ -w /mail ] || die "/mail isn't writable by uid $(id -u):$(id -g), but it belongs to $(stat -c %u:%g /mail); set PUID=$(stat -c %u /mail) and PGID=$(stat -c %g /mail) in .env"
 
 config=/tmp/mbsyncrc
 umask 077
