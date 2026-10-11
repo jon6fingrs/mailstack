@@ -9,8 +9,10 @@ were the real thing.
   everything here.
 - **Dovecot** serves the copy over IMAP (with TLS) to your phone, laptop or
   webmail.
-- **Solr** and **Tika** make server-side search fast, including text inside
-  attachments (PDF, Word, Excel and more).
+- **Fast search** across the whole archive, including text inside
+  attachments (PDF, Word, Excel and more), using Dovecot's built-in search
+  index plus **Tika** to read attachments.
+- **All Mail** and **Flagged** folders that gather messages from every folder.
 
 It's the successor to [mbsync-dovecot](https://github.com/jon6fingrs/mbsync-dovecot),
 written up in the [Making an Automatic Email Backup](https://thehelpfulidiot.com/making-an-automatic-email-backup)
@@ -18,9 +20,9 @@ series. Coming from those images? See [MIGRATING.md](MIGRATING.md).
 
 ```text
  remote IMAP ──mbsync──▶  Maildir on disk  ◀──Dovecot──▶ your mail apps (IMAPS)
-                                                 │
-                                         Solr + Tika (search index,
-                                         private network only)
+                          (+ search index)       │
+                                               Tika (reads attachments,
+                                               private network only)
 ```
 
 ## Quick start
@@ -57,7 +59,6 @@ Everything is set in `.env`; [.env.example](.env.example) explains each line.
 | `MAIL_USER`, `MAIL_PASSWORD` | (required) | Login for *your* IMAP server. The password can be plain text or a hash from `doveadm pw`. |
 | `IMAPS_PORT` | 993 | Port mail apps connect to. |
 | `CERT_DIR`, `TLS_CERT_FILE`, `TLS_KEY_FILE` | self-signed | Your certificate. See below. |
-| `SOLR_HEAP` | `1g` | Memory for the search index. |
 | `TZ` | `UTC` | Time zone for log timestamps. |
 
 Less common settings, set under `environment:` in `compose.yaml`:
@@ -106,32 +107,58 @@ your phone has downloaded. In practice:
   *swims*.
 - Accents and case don't matter: *cafe* finds *Café*.
 - Text inside attachments is searchable (via Tika).
-- Clients that send IMAP `FUZZY` searches also get typo tolerance
-  (*zebrafsh* finds *zebrafish*). Most phone apps don't use it.
-- Matching is by whole words (and their variants), not arbitrary fragments:
-  *invo* won't find *invoice*.
+- Words match from their start, so search-as-you-type works: *invo* finds
+  *invoice*, *447* finds *4471*. Fragments from the middle of a word don't
+  (*voice* won't find *invoice*); see below to turn that on.
+- Search **Virtual/All** to search every folder at once.
 
 New mail is indexed in the background within `INDEX_INTERVAL` of arriving.
 Anything not yet indexed is indexed on the spot when you search, so results
 are always complete.
 
+The index is Dovecot's built-in [flatcurve](https://doc.dovecot.org/latest/core/plugins/fts_flatcurve.html)
+engine. Each folder gets an `fts-flatcurve` directory next to its mail; expect
+the index to take roughly a third as much space as the mail itself. It can
+always be rebuilt (see below), so it's fine to leave it out of backups.
+
+To also match fragments from the middle of words, mount a file into
+`/etc/dovecot/conf.d/` containing `fts flatcurve { substring_search = yes }`
+and rebuild the index. It makes the index about three times bigger.
+
+## All Mail and Flagged
+
+Two extra folders appear under **Virtual**:
+
+- **Virtual/All**: every message in the archive except Trash and Junk/Spam,
+  in one list. Searching it searches everything at once.
+- **Virtual/Flagged**: every flagged message, from any folder. Flag or unflag
+  a message anywhere and it appears or disappears here.
+
+They're live views, not copies: nothing is duplicated on disk, and changes
+made in them (flags, read state, deleting) apply to the real message. To
+change which folders they cover, mount your own copy of `dovecot/virtual/`
+over `/etc/dovecot/virtual` (one folder pattern per line, `-` to exclude).
+
 ## How it fits together
 
 - The archive is plain Maildir: one file per message, readable by any tool,
   easy to back up. Dovecot keeps its own small index files alongside.
-- Solr's index lives in the `solr-data` volume. It can always be rebuilt from
-  the mail (see below), so it doesn't need backing up.
-- Solr and Tika sit on an internal Docker network with no published ports and
-  no internet access, since neither has authentication.
+- The search index lives next to the mail (`fts-flatcurve` in each folder),
+  and the virtual folders keep a small index in `.dovecot-virtual`. Both are
+  hidden from mail apps and from mbsync.
+- Tika sits on an internal Docker network with no published ports and no
+  internet access, since it has no authentication.
 - Nothing runs `chown` or `chmod` on your files at startup.
 
 ### Rebuilding the search index
 
-Only needed if the index is lost or damaged:
+Needed once after moving from an older setup, or if the index is lost or
+damaged. It runs in the foreground; a large archive can take a while, and
+mail keeps working meanwhile.
 
 ```bash
 docker compose exec dovecot doveadm fts rescan -u MAIL_USER
-docker compose exec dovecot doveadm index -u MAIL_USER -q '*'
+docker compose exec dovecot doveadm index -u MAIL_USER '*'
 ```
 
 ## Push notifications on iPhone
@@ -145,8 +172,9 @@ server sooner, lower `SYNC_INTERVAL` (120 is reasonable for most providers).
 ## Testing
 
 `tests/smoke.sh` builds the images and runs the whole stack against a
-throwaway IMAP server: syncing, login, search (including attachments and
-fuzzy search), certificate reload, and that remote deletions never remove
+throwaway IMAP server: syncing, login, background indexing, search (including
+attachments, accents, word variants and partial words), the All Mail and
+Flagged folders, certificate reload, and that remote deletions never remove
 local mail. GitHub Actions runs it on every push.
 
 ```bash
@@ -159,5 +187,4 @@ sudo tests/smoke.sh
 |---|---|
 | Dovecot | 2.4.5 (official `dovecot/dovecot` image) |
 | mbsync (isync) | 1.5.1 (Debian 13) |
-| Solr | 9.11.0 |
 | Tika | 4.1.0 |

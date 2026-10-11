@@ -26,10 +26,7 @@ services:
       - ${CERT_DIR:-./certs}:/ssl:ro
     networks: [default, backend]
     depends_on:
-      solr:
-        condition: service_healthy
-      tika:
-        condition: service_started
+      - tika
 
   mbsync:
     image: ghcr.io/jon6fingrs/mailstack-mbsync:${MAILSTACK_VERSION:-latest}
@@ -48,25 +45,14 @@ services:
     volumes:
       - ${MAIL_DIR}:/mail
 
-  solr:
-    image: ghcr.io/jon6fingrs/mailstack-solr:${MAILSTACK_VERSION:-latest}
-    restart: unless-stopped
-    environment:
-      SOLR_HEAP: ${SOLR_HEAP:-1g}
-    volumes:
-      - solr-data:/var/solr
-    networks: [backend]
-
   tika:
     image: apache/tika:4.1.0
     restart: unless-stopped
     networks: [backend]
 
 networks:
-  # Solr and Tika have no authentication, so they live on a network with no
-  # published ports and no internet access. Only Dovecot can reach them.
+  # Tika reads attachments for the search index and has no authentication, so
+  # it lives on a network with no published ports and no internet access.
+  # Only Dovecot can reach it.
   backend:
     internal: true
-
-volumes:
-  solr-data:

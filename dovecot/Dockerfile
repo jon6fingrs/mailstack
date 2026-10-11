@@ -1,4 +1,4 @@
-# Dovecot's official image (built with Solr support), with mailstack's
+# Dovecot's official image (built with the flatcurve search index), with mailstack's
 # config and entrypoint. The -root variant lets Dovecot listen on 993 and
 # access mail as whatever PUID owns the archive.
 ARG DOVECOT_VERSION=2.4.5
@@ -6,6 +6,7 @@ FROM dovecot/dovecot:${DOVECOT_VERSION}-root
 
 RUN rm -f /etc/dovecot/conf.d/* /etc/dovecot/vendor.d/*
 COPY dovecot.conf /etc/dovecot/dovecot.conf
+COPY virtual/ /etc/dovecot/virtual/
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/mailstack-entrypoint
 
 RUN mkdir -p /mail

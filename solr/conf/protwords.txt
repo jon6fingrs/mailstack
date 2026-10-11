@@ -1,1 +1,0 @@
-# Words that must not be stemmed, one per line (used at index and query time).
